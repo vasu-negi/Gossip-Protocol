@@ -16,6 +16,7 @@ type Gossip =
     | Result of Double * Double
     | Time of int
     | TotalNodes of int
+    | Shutdown of int*IActorRef []
 
 type Topology = 
     | Gossip of String
@@ -29,7 +30,7 @@ type Protocol =
     
 //https://gist.github.com/akimboyko/e58e4bfbba3e9a551f05 Example 3
 
-type Supervisor() =
+type Supervisor()  =
     inherit Actor()
     let mutable count = 0
     let mutable start = 0
@@ -44,7 +45,11 @@ type Supervisor() =
             if count = totalNodes then
                 printfn "Time for convergence: %i ms" (ending - start)
                 Environment.Exit(0)
-
+        | Shutdown (num_nodes,nodeArray)->
+            for i = 0 to num_nodes do   
+                let nodeToShutdown = nodeArray.[Random().Next(0, num_nodes)]
+                printfn  "shutting down %s" (nodeToShutdown|>string)
+               
 
         | Result (sum, weight) ->
             let ending = DateTime.Now.TimeOfDay.Milliseconds
@@ -129,7 +134,7 @@ let mutable nodes =
 
 let topology = string (fsi.CommandLineArgs.GetValue 2)
 let protocol = string (fsi.CommandLineArgs.GetValue 3)
-
+let num_nodes = string (fsi.CommandLineArgs.GetValue 4) |>int
 
 
 let system = ActorSystem.Create("System")
@@ -160,6 +165,8 @@ match topology with
 
 
     let leader = Random().Next(0, nodes)
+    
+   
     match protocol with
     | "gossip" -> 
         supervisor <! TotalNodes(nodes)
@@ -179,6 +186,14 @@ match topology with
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! Initailize(nodeArray))
 
     let leader = Random().Next(0, nodes)
+    let leader = Random().Next(0, nodes)
+
+
+    for i = 0 to num_nodes do   
+        let nodeToShutdown = nodeArray.[Random().Next(0, nodes)]
+        printfn  "shutting down %s" (nodeToShutdown|>string)
+        system.Stop(nodeToShutdown)
+
 
     match protocol with
     | "gossip" -> 
@@ -198,6 +213,7 @@ match topology with
 
     let totGrid = gridSize * gridSize
     let nodeArray = Array.zeroCreate (totGrid)
+    
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
 
     for i in [ 0 .. gridSize - 1 ] do
