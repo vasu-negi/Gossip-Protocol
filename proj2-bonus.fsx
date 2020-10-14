@@ -154,7 +154,6 @@ match topology with
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
         
     for i in [ 0 .. nodes ] do
-        printfn "%i %i %i" ((i-1+nodes) % (nodes)) i ((i+1+nodes) % (nodes))
         let mutable neighbourArray = [||]
 
         
