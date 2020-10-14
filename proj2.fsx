@@ -3,6 +3,8 @@
 #r "nuget: Akka.TestKit"
 #endif
 
+
+
 open System
 open Akka.Actor
 open Akka.FSharp
@@ -153,9 +155,16 @@ match topology with
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
         
     for i in [ 0 .. nodes ] do
-        let neighbourArray =
-            [| nodeArray.[((i - 1 + nodes) % (nodes + 1))]
-               nodeArray.[((i + 1 + nodes) % (nodes + 1))] |]
+        let mutable neighbourArray = [||]
+
+        
+        if i = 0 then
+            neighbourArray <- (Array.append neighbourArray [|nodeArray.[i+1]|])
+        elif i = nodes then
+            neighbourArray <- (Array.append neighbourArray [|nodeArray.[i-1]|])
+        else 
+            neighbourArray <- (Array.append neighbourArray [| nodeArray.[(i - 1)] ; nodeArray.[(i + 1 ) ] |] ) 
+        
         nodeArray.[i] <! Initailize(neighbourArray)
 
 

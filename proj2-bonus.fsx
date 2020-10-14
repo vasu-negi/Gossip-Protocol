@@ -1,7 +1,6 @@
-#if INTERACTIVE
-#r "nuget: Akka.FSharp"
-#r "nuget: Akka.TestKit"
-#endif
+#time "on"
+#r "nuget: Akka.FSharp" 
+#r "nuget: Akka.TestKit" 
 
 open System
 open Akka.Actor
@@ -17,7 +16,7 @@ type Gossip =
     | Time of int
     | TotalNodes of int
     | Shutdown of int*IActorRef []
-
+    | GetNeighborsToIgnore of int []
 type Topology = 
     | Gossip of String
     | PushSum of String
@@ -45,12 +44,8 @@ type Supervisor()  =
             if count = totalNodes then
                 printfn "Time for convergence: %i ms" (ending - start)
                 Environment.Exit(0)
-        | Shutdown (num_nodes,nodeArray)->
-            for i = 0 to num_nodes do   
-                let nodeToShutdown = nodeArray.[Random().Next(0, num_nodes)]
-                printfn  "shutting down %s" (nodeToShutdown|>string)
-               
-
+       
+           
         | Result (sum, weight) ->
             let ending = DateTime.Now.TimeOfDay.Milliseconds
             printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
@@ -65,25 +60,25 @@ type Worker(supervisor: IActorRef, numResend: int, nodeNum: int) =
     inherit Actor()
     let mutable rumourCount = 0
     let mutable neighbours: IActorRef [] = [||]
-
+    let mutable neighborsToIgoreArray:int [] = [||]
     //used for push sum
     let mutable sum = nodeNum |> float
     let mutable weight = 1.0
     let mutable termRound = 1
 
-
-
     override x.OnReceive(num) =
         match num :?> Gossip with
         | Initailize aref -> neighbours <- aref
-
+        | GetNeighborsToIgnore shutdownNeighborsList -> neighborsToIgoreArray <-shutdownNeighborsList
         | StartGossip msg ->
             rumourCount <- rumourCount + 1
-            
             if (rumourCount = 10) then supervisor <! ReportMsgRecvd(msg)
-
             if (rumourCount <= 100) then
-                let rnd = Random().Next(0, neighbours.Length)
+                let mutable rnd = Random().Next(0, neighbours.Length)
+                while Array.contains rnd neighborsToIgoreArray do
+                    // printfn "Server not available Server%i " rnd 
+                    rnd <- Random().Next(0, neighbours.Length)
+                // printf "gossip for %i" rnd 
                 neighbours.[rnd] <! StartGossip(msg)
 
         | StartPushSum delta ->
@@ -116,7 +111,7 @@ type Worker(supervisor: IActorRef, numResend: int, nodeNum: int) =
                 <! ComputePushSum(sum, weight, delta)
             | (_, _, _) when termRound >= 3 -> 
                 supervisor <! Result(sum, weight)
-            | _ -> 
+            | _ ->  
                 sum <- sum / 2.0
                 weight <- weight / 2.0
                 termRound <- termRound + 1
@@ -134,12 +129,13 @@ let mutable nodes =
 
 let topology = string (fsi.CommandLineArgs.GetValue 2)
 let protocol = string (fsi.CommandLineArgs.GetValue 3)
-let num_nodes = string (fsi.CommandLineArgs.GetValue 4) |>int
+let numNodesToIgnore = string (fsi.CommandLineArgs.GetValue 4) |>int
 
 
 let system = ActorSystem.Create("System")
 
 let mutable actualNumOfNodes = nodes |> float
+let mutable shutdownNeighborsList : int [] = [||]
 
 
 nodes =
@@ -158,11 +154,25 @@ match topology with
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
         
     for i in [ 0 .. nodes ] do
-        let neighbourArray =
-            [| nodeArray.[((i - 1 + nodes) % (nodes + 1))]
-               nodeArray.[((i + 1 + nodes) % (nodes + 1))] |]
-        nodeArray.[i] <! Initailize(neighbourArray)
+        printfn "%i %i %i" ((i-1+nodes) % (nodes)) i ((i+1+nodes) % (nodes))
+        let mutable neighbourArray = [||]
 
+        
+        if i = 0 then
+            neighbourArray <- (Array.append neighbourArray [|nodeArray.[i+1]|])
+        elif i = nodes then
+            neighbourArray <- (Array.append neighbourArray [|nodeArray.[i-1]|])
+        else 
+            neighbourArray <- (Array.append neighbourArray [| nodeArray.[(i - 1)] ; nodeArray.[(i + 1 ) ] |] ) 
+        
+        nodeArray.[i] <! Initailize(neighbourArray)
+        
+    for i = 1 to numNodesToIgnore do   
+        let mutable rnd_shutdown = Random().Next(0, nodes)
+        printfn  "shutting down %i"  rnd_shutdown
+        shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
+        
+    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! GetNeighborsToIgnore(shutdownNeighborsList))
 
     let leader = Random().Next(0, nodes)
     
@@ -185,19 +195,19 @@ match topology with
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! Initailize(nodeArray))
 
+    for i = 1 to numNodesToIgnore do   
+        let mutable rnd_shutdown = Random().Next(0, nodes)
+        let nodeToShutdown = nodeArray.[rnd_shutdown]
+        printfn  "shutting down %i"  rnd_shutdown
+        shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
+    
+    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! GetNeighborsToIgnore(shutdownNeighborsList))
     let leader = Random().Next(0, nodes)
-    let leader = Random().Next(0, nodes)
-
-
-    for i = 0 to num_nodes do   
-        let nodeToShutdown = nodeArray.[Random().Next(0, nodes)]
-        printfn  "shutting down %s" (nodeToShutdown|>string)
-        system.Stop(nodeToShutdown)
-
 
     match protocol with
     | "gossip" -> 
-        supervisor <! TotalNodes(nodes)
+        supervisor <! TotalNodes(nodes - numNodesToIgnore)
+        
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Gossip -------------"
         nodeArray.[leader] <! StartGossip("Hello")
@@ -227,6 +237,14 @@ match topology with
                         
             nodeArray.[i * gridSize + j] <! Initailize(neighbours)
 
+    for i = 1 to numNodesToIgnore do   
+        printfn "%i" i
+        let mutable rnd_shutdown = Random().Next(0, nodes)
+        let nodeToShutdown = nodeArray.[rnd_shutdown]
+        printfn  "shutting down %i"  rnd_shutdown
+        shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
+    
+    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! GetNeighborsToIgnore(shutdownNeighborsList))
 
 
     let leader = Random().Next(0, totGrid - 1)
