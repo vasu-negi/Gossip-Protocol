@@ -47,12 +47,13 @@ let system = ActorSystem.Create("System")
 
 let mutable actualNumOfNodes = nodes |> float
 
-nodes =
+nodes <-
     match topology with
-    | "2D" | "imp2D" -> 
-        (actualNumOfNodes ** 0.5) ** 2.0 |> float |> int
+    | "2D" | "Imp2D" -> 
+        ((actualNumOfNodes ** 0.5)|>ceil ) ** 2.0 |> int
     | _ -> nodes
 
+printfn "%i" nodes
 let mutable  nodeArray = [||]
 
 let Supervisor(mailbox: Actor<_>) =
@@ -68,7 +69,7 @@ let Supervisor(mailbox: Actor<_>) =
             let ending = DateTime.Now.TimeOfDay.Milliseconds
             count <- count + 1
 
-            printfn "converged %d" count
+            //printfn "converged %d" count
             if count = totalNodes then
                 timer.Stop()
                 printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
@@ -185,7 +186,7 @@ let gossipConvergentActor (mailbox: Actor<_>) =
         let! message = mailbox.Receive()
         match message with 
         | InIt _ ->
-            for i in [0..nodes] do
+            for i in [0..nodes-1] do
                     neighbors.Add nodeArray.[i]
             mailbox.Self <! Active
         | Active ->
@@ -214,7 +215,7 @@ let GossipActor = spawn system "GossipConvergentActor" gossipConvergentActor
 match topology with
 | "line" ->
     nodeArray <- Array.zeroCreate (nodes + 1)
-    //[0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(Worker, supervisor, 10, i + 1), "demo" + string (i)))
+    
 
     for x in [0..nodes] do
         let key: string = "demo" + string(x) 
@@ -282,9 +283,9 @@ match topology with
     let gridSize = nodes |> float |> sqrt |> ceil |> int 
 
     
-    nodeArray <- Array.zeroCreate (nodes)
+    nodeArray <- Array.zeroCreate (nodes+1)
     
-    for x in [0..nodes-1] do
+    for x in [0..nodes] do
         let key: string = "demo" + string(x) 
         let actorRef = spawn system (key) Worker
         
@@ -331,9 +332,9 @@ match topology with
     let gridSize = nodes |> float |> sqrt |> ceil |> int 
 
     
-    nodeArray <- Array.zeroCreate (nodes)
+    nodeArray <- Array.zeroCreate (nodes+1)
     
-    for x in [0..nodes-1] do
+    for x in [0..nodes] do
         let key: string = "demo" + string(x) 
         let actorRef = spawn system (key) Worker
         
