@@ -47,7 +47,7 @@ We able to run all `line`, `full`, `2D` and `Imp2D` in any combination with `gos
 
 ### PushSum
 
-
+The PushSum network works by sending message `s` and `w` as parameter to an actor. The intial value of `s` is equal to the index of the actor and `w = 1`. The propogation stops when a actor's `s/w` ratio does not change for 3 times in a row (i.e stays within limit of 10^-10)
 
 #### Linear Scale
 
