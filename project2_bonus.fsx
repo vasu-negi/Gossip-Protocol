@@ -97,6 +97,7 @@ let Worker(mailbox: Actor<_>) =
     let mutable termRound = 1
     let mutable neighborsToIgoreArray:int [] = [||]
     let mutable faultynode = false
+    let mutable alreadyConverged = false
 
     let rec loop()= actor{
         let! message = mailbox.Receive();
@@ -110,6 +111,8 @@ let Worker(mailbox: Actor<_>) =
             neighborsToIgoreArray <-shutdownNeighborsList
             if Array.contains indexDictionary.[mailbox.Self] neighborsToIgoreArray  then
                 faultynode <- true
+             
+                
         | ActivateWorker ->
             if rumourCount < 11 then
                 let rnd = Random().Next(0, neighbours.Length)
@@ -138,47 +141,28 @@ let Worker(mailbox: Actor<_>) =
             neighbours.[index] <! ComputePushSum(sum, weight, delta)
 
         | ComputePushSum (s: float, w, delta) ->
-            let newsum = sum + s
-            let newweight = weight + w
+            if not faultynode then 
 
-            let cal =
-                sum / weight - newsum / newweight |> abs
+                let newsum = sum + s
+                let newweight = weight + w
 
-
-            match (s, w, delta) with
-            | (_, _, delta) when cal > delta -> 
-                termRound <- 0
-                sum <- sum + s
-                weight <- weight + w
-                sum <- sum / 2.0
-                weight <- weight / 2.0
+                let cal = sum / weight - newsum / newweight |> abs
                 
-                if not faultynode then
-                    let index =
-                        Random().Next(0, neighbours.Length)
-            
-                    neighbours.[index]
-                    <! ComputePushSum(sum, weight, delta)
+                if not alreadyConverged then
+                    if cal > delta then
+                        termRound <- 0
+                    else 
+                        termRound <- termRound + 1
 
-            | (_, _, _) when termRound >= 3 -> 
-                supervisor <! Result(sum, weight)
-                if not faultynode then
-                    let index =
-                        Random().Next(0, neighbours.Length)
-
-                    neighbours.[index]
-                    <! ComputePushSum(sum, weight, delta)
-
-            | _ -> 
-                sum <- sum / 2.0
-                weight <- weight / 2.0
-                termRound <- termRound + 1
-                if not faultynode then
-                    let index =
-                        Random().Next(0, neighbours.Length)
-
-                    neighbours.[index]
-                    <! ComputePushSum(sum, weight, delta)
+                if  termRound = 3 then
+                    termRound <- 0
+                    alreadyConverged <- true
+                    supervisor <! Result(sum, weight)
+                
+                sum <- newsum / 2.0
+                weight <- newweight / 2.0
+                let index = Random().Next(0, neighbours.Length)
+                neighbours.[index] <! ComputePushSum(sum, weight, delta)
         | _ -> ()
 
         return! loop()
@@ -281,7 +265,7 @@ match topology with
         let mutable rnd_shutdown = Random().Next(0, nodes)
         printfn  "shutting down %i"  rnd_shutdown
         shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
-    //[0..nodes] |> List.iter (fun i -> nodeArray.[i] <! Initailize(nodeArray))
+    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! GetNeighborsToIgnore(shutdownNeighborsList))
     
     for i in [ 0 .. nodes ] do
         let mutable neighbourArray = [||]
@@ -321,10 +305,13 @@ match topology with
         nodeArray.[x] <! InitializeVariables x
         indexDictionary.Add(nodeArray.[x], x)
         dictionary.Add(nodeArray.[x], false)
+
     for i = 1 to numNodesToIgnore do   
         let mutable rnd_shutdown = Random().Next(0, nodes)
         printfn  "shutting down %i"  rnd_shutdown
         shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
+
+    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! GetNeighborsToIgnore(shutdownNeighborsList))
     for i in [ 0 .. (gridSize-1)] do
         for j in [ 0 .. (gridSize-1) ] do
             let mutable neighbours: IActorRef [] = [||]
@@ -374,6 +361,7 @@ match topology with
         let mutable rnd_shutdown = Random().Next(0, nodes)
         printfn  "shutting down %i"  rnd_shutdown
         shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
+    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! GetNeighborsToIgnore(shutdownNeighborsList))
 
     for i in [ 0 .. (gridSize-1)] do
         for j in [ 0 .. (gridSize-1) ] do
