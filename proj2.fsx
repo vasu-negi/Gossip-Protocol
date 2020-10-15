@@ -76,9 +76,9 @@ let Supervisor(mailbox: Actor<_>) =
                 Environment.Exit(0)
 
         | Result (sum, weight) ->
-            let ending = DateTime.Now.TimeOfDay.Milliseconds
+            timer.Stop()
             printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
-            printfn "Time for convergence: %i ms" (ending - start)
+            printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
             Environment.Exit(0)
         | Time strtTime -> start <- strtTime
 
@@ -127,9 +127,9 @@ let Worker(mailbox: Actor<_>) =
                 dictionary.[mailbox.Self] <- true
             rumourCount <- rumourCount + 1
             
-            
+        | InitializeVariables number ->
+            sum <- number |> double
 
-             
 
         | StartPushSum delta ->
             let index = Random().Next(0, neighbours.Length)
@@ -159,6 +159,7 @@ let Worker(mailbox: Actor<_>) =
 
                 neighbours.[index]
                 <! ComputePushSum(sum, weight, delta)
+
             | (_, _, _) when termRound >= 3 -> 
                 supervisor <! Result(sum, weight)
             | _ -> 
@@ -222,6 +223,8 @@ match topology with
         let actorRef = spawn system (key) Worker
         nodeArray.[x] <- actorRef 
         dictionary.Add(nodeArray.[x], false)
+        nodeArray.[x] <! InitializeVariables x
+
     
 
     for i in [ 0 .. nodes ] do
@@ -261,6 +264,7 @@ match topology with
         let key: string = "demo" + string(x) 
         let actorRef = spawn system (key) Worker
         nodeArray.[x] <- actorRef 
+        nodeArray.[x] <! InitializeVariables x
         dictionary.Add(nodeArray.[x], false)
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! Initailize(nodeArray))
     timer.Start()
@@ -275,7 +279,7 @@ match topology with
     | "push-sum" -> 
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
-        nodeArray.[leader] <! Call
+        nodeArray.[leader] <! StartPushSum(10.0 ** -10.0) 
     | _ ->
         printfn "Invalid topology"
 
@@ -290,6 +294,7 @@ match topology with
         let actorRef = spawn system (key) Worker
         
         nodeArray.[x] <- actorRef 
+        nodeArray.[x] <! InitializeVariables x
         dictionary.Add(nodeArray.[x], false)
         
     printfn "if"
@@ -298,16 +303,16 @@ match topology with
         for j in [ 0 .. (gridSize-1) ] do
             let mutable neighbours: IActorRef [] = [||]
             if j + 1 < gridSize then
-                printfn "right %d %d formula %d" i j ((i * gridSize) + j + 1)
+                //printfn "right %d %d formula %d" i j ((i * gridSize) + j + 1)
                 neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j + 1] |])
             if  j - 1 >= 0 then 
-                printfn "left %d %d formula %d" i j ((i * gridSize) + j - 1)
+                //printfn "left %d %d formula %d" i j ((i * gridSize) + j - 1)
                 neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j - 1] |])
             if i - 1 >= 0 then
-                printfn "top %d %d  formula %d" i j ((i - 1 ) * gridSize + j)
+                //printfn "top %d %d  formula %d" i j ((i - 1 ) * gridSize + j)
                 neighbours <- Array.append neighbours [| nodeArray.[(i - 1 ) * gridSize + j ] |]
             if  i + 1 < gridSize then
-                printfn "bottom %d %d  formula %d %d grid size " i j ((i + 1 ) * gridSize + j) gridSize
+                //printfn "bottom %d %d  formula %d %d grid size " i j ((i + 1 ) * gridSize + j) gridSize
                 neighbours <- (Array.append neighbours [| nodeArray.[(i + 1) * gridSize + j] |])
             nodeArray.[i * gridSize + j] <! Initailize(neighbours)
    
@@ -339,24 +344,25 @@ match topology with
         let actorRef = spawn system (key) Worker
         
         nodeArray.[x] <- actorRef 
+        nodeArray.[x] <! InitializeVariables x
         dictionary.Add(nodeArray.[x], false)
         
-    printfn "if"
+    //printfn "if"
 
     for i in [ 0 .. (gridSize-1)] do
         for j in [ 0 .. (gridSize-1) ] do
             let mutable neighbours: IActorRef [] = [||]
             if j + 1 < gridSize then
-                printfn "right %d %d formula %d" i j ((i * gridSize) + j + 1)
+                //printfn "right %d %d formula %d" i j ((i * gridSize) + j + 1)
                 neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j + 1] |])
             if  j - 1 >= 0 then 
-                printfn "left %d %d formula %d" i j ((i * gridSize) + j - 1)
+                //printfn "left %d %d formula %d" i j ((i * gridSize) + j - 1)
                 neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j - 1] |])
             if i - 1 >= 0 then
-                printfn "top %d %d  formula %d" i j ((i - 1 ) * gridSize + j)
+                //printfn "top %d %d  formula %d" i j ((i - 1 ) * gridSize + j)
                 neighbours <- Array.append neighbours [| nodeArray.[(i - 1 ) * gridSize + j ] |]
             if  i + 1 < gridSize then
-                printfn "bottom %d %d  formula %d %d grid size " i j ((i + 1 ) * gridSize + j) gridSize
+                //printfn "bottom %d %d  formula %d %d grid size " i j ((i + 1 ) * gridSize + j) gridSize
                 neighbours <- (Array.append neighbours [| nodeArray.[(i + 1) * gridSize + j] |])
 
             let rnd = Random().Next(0, nodes-1)
