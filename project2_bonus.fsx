@@ -111,7 +111,7 @@ let Worker(mailbox: Actor<_>) =
             neighborsToIgoreArray <-shutdownNeighborsList
             if Array.contains indexDictionary.[mailbox.Self] neighborsToIgoreArray  then
                 faultynode <- true
-             
+                
                 
         | ActivateWorker ->
             if rumourCount < 11 then
@@ -141,24 +141,27 @@ let Worker(mailbox: Actor<_>) =
             neighbours.[index] <! ComputePushSum(sum, weight, delta)
 
         | ComputePushSum (s: float, w, delta) ->
-            if not faultynode then 
+            let newsum = sum + s
+            let newweight = weight + w
 
-                let newsum = sum + s
-                let newweight = weight + w
+            let cal = sum / weight - newsum / newweight |> abs
 
-                let cal = sum / weight - newsum / newweight |> abs
-                
-                if not alreadyConverged then
-                    if cal > delta then
-                        termRound <- 0
-                    else 
-                        termRound <- termRound + 1
+            if alreadyConverged then
+
+                let index = Random().Next(0, neighbours.Length)
+                neighbours.[index] <! ComputePushSum(s, w, delta)
+            
+            else
+                if cal > delta then
+                    termRound <- 0
+                else 
+                    termRound <- termRound + 1
 
                 if  termRound = 3 then
                     termRound <- 0
                     alreadyConverged <- true
                     supervisor <! Result(sum, weight)
-                
+            
                 sum <- newsum / 2.0
                 weight <- newweight / 2.0
                 let index = Random().Next(0, neighbours.Length)

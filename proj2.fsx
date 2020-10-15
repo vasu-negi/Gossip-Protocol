@@ -133,21 +133,26 @@ let Worker(mailbox: Actor<_>) =
 
             let cal = sum / weight - newsum / newweight |> abs
 
-            if not alreadyConverged then
+            if alreadyConverged then
+
+                let index = Random().Next(0, neighbours.Length)
+                neighbours.[index] <! ComputePushSum(s, w, delta)
+            
+            else
                 if cal > delta then
                     termRound <- 0
                 else 
                     termRound <- termRound + 1
 
-            if  termRound = 3 then
-                termRound <- 0
-                alreadyConverged <- true
-                supervisor <! Result(sum, weight)
+                if  termRound = 3 then
+                    termRound <- 0
+                    alreadyConverged <- true
+                    supervisor <! Result(sum, weight)
             
-            sum <- newsum / 2.0
-            weight <- newweight / 2.0
-            let index = Random().Next(0, neighbours.Length)
-            neighbours.[index] <! ComputePushSum(sum, weight, delta)
+                sum <- newsum / 2.0
+                weight <- newweight / 2.0
+                let index = Random().Next(0, neighbours.Length)
+                neighbours.[index] <! ComputePushSum(sum, weight, delta)
         | _ -> ()
         return! loop()
     }            
