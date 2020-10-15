@@ -7,9 +7,10 @@ open Akka.Actor
 open Akka.Configuration
 open Akka.FSharp
 open System.Diagnostics
+    
 open System.Collections.Generic
-///////////////////////////Initialization////////////////////////////////////////
-type GossipMessageTypes =
+
+type Gossip =
     | Initailize of IActorRef []
     | InitializeVariables of int
     | StartGossip of String
@@ -21,8 +22,7 @@ type GossipMessageTypes =
     | TotalNodes of int
     | Active 
     | Call
-    | AddNeighbors
-
+    | InIt
 type Topology = 
     | Gossip of String
     | PushSum of String
@@ -32,21 +32,30 @@ type Protocol =
     | Full of String
     | TwoDimension of String
 
+
+
+//Point of execution
 let mutable nodes =
     int (string (fsi.CommandLineArgs.GetValue 1))
+
 let topology = string (fsi.CommandLineArgs.GetValue 2)
 let protocol = string (fsi.CommandLineArgs.GetValue 3)
+
+
 let timer = Diagnostics.Stopwatch()
 let system = ActorSystem.Create("System")
+
 let mutable actualNumOfNodes = nodes |> float
+
 nodes <-
     match topology with
     | "2D" | "Imp2D" -> 
         ((actualNumOfNodes ** 0.5)|>ceil ) ** 2.0 |> int
     | _ -> nodes
 
+
 let mutable  nodeArray = [||]
-///////////////////////////Initialization////////////////////////////////////////
+
 let Supervisor(mailbox: Actor<_>) =
     
     let mutable count = 0
@@ -79,6 +88,8 @@ let Supervisor(mailbox: Actor<_>) =
         return! loop()
     }            
     loop()
+
+
 
 
 let supervisor = spawn system "Supervisor" Supervisor
@@ -169,13 +180,13 @@ let Worker(mailbox: Actor<_>) =
 
 
 
-let GossipConvergentActor (mailbox: Actor<_>) =
+let gossipConvergentActor (mailbox: Actor<_>) =
     let neighbors = new List<IActorRef>()
 
     let rec loop() = actor {
         let! message = mailbox.Receive()
         match message with 
-        | AddNeighbors _ ->
+        | InIt _ ->
             for i in [0..nodes-1] do
                     neighbors.Add nodeArray.[i]
             mailbox.Self <! Active
@@ -195,12 +206,12 @@ let GossipConvergentActor (mailbox: Actor<_>) =
                     randomActor <! Call
 
                 mailbox.Self <! Active 
-        | _ -> ()
+
         return! loop()
     }
     loop()
 
-let GossipActor = spawn system "GossipConvergentActor" GossipConvergentActor
+let GossipActor = spawn system "GossipConvergentActor" gossipConvergentActor
 
 match topology with
 | "line" ->
@@ -237,7 +248,7 @@ match topology with
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "Starting Protocol Gossip"
         nodeArray.[leader] <! Active
-        GossipActor<! AddNeighbors
+        GossipActor<! InIt
         
     | "push-sum" -> 
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
@@ -314,7 +325,7 @@ match topology with
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Gossip -------------"
         nodeArray.[leader] <! Active
-        GossipActor<! AddNeighbors
+        GossipActor<! InIt
     | "push-sum" -> 
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
@@ -367,7 +378,7 @@ match topology with
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Gossip -------------"
         nodeArray.[leader] <! Active
-        GossipActor<! AddNeighbors
+        GossipActor<! InIt
     | "push-sum" -> 
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
