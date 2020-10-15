@@ -66,7 +66,6 @@ let Supervisor(mailbox: Actor<_>) =
                 Environment.Exit(0)
         | Result (sum, weight) ->
             count <- count + 1
-            printfn "%d" count
             if count = totalNodes then
                 timer.Stop()
                 printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
@@ -149,7 +148,7 @@ let Worker(mailbox: Actor<_>) =
             weight <- newweight / 2.0
             let index = Random().Next(0, neighbours.Length)
             neighbours.[index] <! ComputePushSum(sum, weight, delta)
-                
+        | _ -> ()
         return! loop()
     }            
     loop()
