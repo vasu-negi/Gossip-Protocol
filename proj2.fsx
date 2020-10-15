@@ -53,7 +53,7 @@ nodes <-
         ((actualNumOfNodes ** 0.5)|>ceil ) ** 2.0 |> int
     | _ -> nodes
 
-printfn "%i" nodes
+
 let mutable  nodeArray = [||]
 
 let Supervisor(mailbox: Actor<_>) =
@@ -297,7 +297,7 @@ match topology with
         nodeArray.[x] <! InitializeVariables x
         dictionary.Add(nodeArray.[x], false)
         
-    printfn "if"
+    
 
     for i in [ 0 .. (gridSize-1)] do
         for j in [ 0 .. (gridSize-1) ] do
