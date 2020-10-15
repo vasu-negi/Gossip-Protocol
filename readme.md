@@ -6,7 +6,7 @@
 - [Table of Contents](#table-of-contents)
 - [Build Process](#build-process)
 - [What is Working](#what-is-working)
-- [What is the largest network you managed to deal with for each type oftopology and algorithm](#what-is-the-largest-network-you-managed-to-deal-with-for-each-type-oftopology-and-algorithm)
+- [What is the largest network you managed to deal with for each type of topology and algorithm](#what-is-the-largest-network-you-managed-to-deal-with-for-each-type-of-topology-and-algorithm)
 
 ## Build Process
 
@@ -17,5 +17,6 @@
 
 We able to run all `line`, `full`, `2D` and `Imp2D` in any combination with `gossip` or `push-sum` protocol
 
-## What is the largest network you managed to deal with for each type oftopology and algorithm
+## What is the largest network you managed to deal with for each type of topology and algorithm
 
+The largest network that we have managed to solve is 10k nodes for each topology and algorithm.
