@@ -22,6 +22,7 @@ type Gossip =
     | TotalNodes of int
     | Active 
     | Call
+    | InIt
 type Topology = 
     | Gossip of String
     | PushSum of String
@@ -30,6 +31,7 @@ type Protocol =
     | Line of String
     | Full of String
     | TwoDimension of String
+
 
 
 //Point of execution
@@ -45,15 +47,13 @@ let system = ActorSystem.Create("System")
 
 let mutable actualNumOfNodes = nodes |> float
 
-
 nodes =
     match topology with
     | "2D" | "imp2D" -> 
         (actualNumOfNodes ** 0.5) ** 2.0 |> float |> int
     | _ -> nodes
 
-
-
+let mutable  nodeArray = [||]
 
 let Supervisor(mailbox: Actor<_>) =
     
@@ -67,6 +67,8 @@ let Supervisor(mailbox: Actor<_>) =
         | ReportMsgRecvd _ -> 
             let ending = DateTime.Now.TimeOfDay.Milliseconds
             count <- count + 1
+
+            printfn "converged %d" count
             if count = totalNodes then
                 timer.Stop()
                 printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
@@ -88,6 +90,7 @@ let Supervisor(mailbox: Actor<_>) =
 
 
 
+
 let supervisor = spawn system "Supervisor" Supervisor
 let dictionary = new Dictionary<IActorRef, bool>()
 
@@ -95,8 +98,6 @@ let dictionary = new Dictionary<IActorRef, bool>()
 let Worker(mailbox: Actor<_>) =
     let mutable rumourCount = 0
     let mutable neighbours: IActorRef [] = [||]
-
-    
     let mutable sum = 0 |>float
     let mutable weight = 1.0
     let mutable termRound = 1
@@ -110,16 +111,15 @@ let Worker(mailbox: Actor<_>) =
         | Initailize aref -> neighbours <- aref
 
         | Active ->
-            let rnd = Random().Next(0, neighbours.Length)
-            if not dictionary.[neighbours.[rnd]] then
-                neighbours.[rnd] <! Call
-            mailbox.Self <! Active
+            if rumourCount < 11 then
+                let rnd = Random().Next(0, neighbours.Length)
+                if not dictionary.[neighbours.[rnd]] then
+                    neighbours.[rnd] <! Call
+                mailbox.Self <! Active
 
         | Call ->
             
-            
             if rumourCount = 0 then 
-                
                 mailbox.Self <! Active
             if (rumourCount = 10) then 
                 supervisor <! ReportMsgRecvd "Rumor"
@@ -178,12 +178,42 @@ let Worker(mailbox: Actor<_>) =
 
 
 
+let gossipConvergentActor (mailbox: Actor<_>) =
+    let neighbors = new List<IActorRef>()
 
+    let rec loop() = actor {
+        let! message = mailbox.Receive()
+        match message with 
+        | InIt _ ->
+            for i in [0..nodes] do
+                    neighbors.Add nodeArray.[i]
+            mailbox.Self <! Active
+        | Active ->
+            if neighbors.Count > 0 then
+                let randomNum = Random().Next(neighbors.Count)
+                let randomActor: IActorRef = neighbors.[randomNum]
 
+                // Check random actor's status
+                let converged: bool = dictionary.[randomActor]
+
+                // while random actor is already converged, pick next neighbor
+                if (converged) then  
+                    // Removing converged actor from current actor's neighbors list
+                    neighbors.Remove randomActor
+                else 
+                    randomActor <! Call
+
+                mailbox.Self <! Active 
+
+        return! loop()
+    }
+    loop()
+
+let GossipActor = spawn system "GossipConvergentActor" gossipConvergentActor
 
 match topology with
 | "line" ->
-    let nodeArray = Array.zeroCreate (nodes + 1)
+    nodeArray <- Array.zeroCreate (nodes + 1)
     //[0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(Worker, supervisor, 10, i + 1), "demo" + string (i)))
 
     for x in [0..nodes] do
@@ -206,13 +236,16 @@ match topology with
 
     
     let leader = Random().Next(0, nodes)
+
     timer.Start()
     match protocol with
     | "gossip" -> 
         supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "Starting Protocol Gossip"
-        nodeArray.[leader] <! StartGossip("This is Line Topology")
+        nodeArray.[leader] <! Active
+        GossipActor<! InIt
+        
     | "push-sum" -> 
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "Starting Push Sum Protocol for Line"
@@ -221,7 +254,7 @@ match topology with
         printfn "Invlaid topology"   
 
 | "full" ->
-    let nodeArray = Array.zeroCreate (nodes + 1)
+    nodeArray <- Array.zeroCreate (nodes + 1)
    
     for x in [0..nodes] do
         let key: string = "demo" + string(x) 
@@ -246,35 +279,99 @@ match topology with
         printfn "Invalid topology"
 
 | "2D" ->
-    let gridSize = actualNumOfNodes |> sqrt |> ceil |> int 
+    let gridSize = nodes |> float |> sqrt |> ceil |> int 
 
-    let totGrid = gridSize * gridSize
-    let nodeArray = Array.zeroCreate (totGrid)
-    //[0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
-    for x in [0..nodes] do
+    
+    nodeArray <- Array.zeroCreate (nodes)
+    
+    for x in [0..nodes-1] do
         let key: string = "demo" + string(x) 
         let actorRef = spawn system (key) Worker
-        nodeArray.[x] <- actorRef 
         
-    for i in [ 0 .. gridSize - 1 ] do
-        for j in [ 0 .. gridSize - 1 ] do
-            let mutable neighbours: IActorRef [] = [||]
-            match (i, j) with
-            | (_, j) when j + 1 < gridSize -> neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j + 1] |])
-            | (_, j) when j - 1 >= 0 -> neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j + 1] |])
-            | (i, _) when i - 1 >= 0 -> neighbours <- Array.append neighbours [| nodeArray.[i * gridSize + j - 1] |]
-            | (i, _) when i + 1 < gridSize -> neighbours <- (Array.append neighbours [| nodeArray.[(i + 1) * gridSize + j] |])
-                        
-            nodeArray.[i * gridSize + j] <! Initailize(neighbours)
+        nodeArray.[x] <- actorRef 
+        dictionary.Add(nodeArray.[x], false)
+        
+    printfn "if"
 
-    let leader = Random().Next(0, totGrid - 1)
+    for i in [ 0 .. (gridSize-1)] do
+        for j in [ 0 .. (gridSize-1) ] do
+            let mutable neighbours: IActorRef [] = [||]
+            if j + 1 < gridSize then
+                printfn "right %d %d formula %d" i j ((i * gridSize) + j + 1)
+                neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j + 1] |])
+            if  j - 1 >= 0 then 
+                printfn "left %d %d formula %d" i j ((i * gridSize) + j - 1)
+                neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j - 1] |])
+            if i - 1 >= 0 then
+                printfn "top %d %d  formula %d" i j ((i - 1 ) * gridSize + j)
+                neighbours <- Array.append neighbours [| nodeArray.[(i - 1 ) * gridSize + j ] |]
+            if  i + 1 < gridSize then
+                printfn "bottom %d %d  formula %d %d grid size " i j ((i + 1 ) * gridSize + j) gridSize
+                neighbours <- (Array.append neighbours [| nodeArray.[(i + 1) * gridSize + j] |])
+            nodeArray.[i * gridSize + j] <! Initailize(neighbours)
+   
+    
+    let leader = Random().Next(0, nodes)
     timer.Start()
     match protocol with 
     | "gossip" -> 
-        supervisor <! TotalNodes(totGrid - 1)
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Gossip -------------"
-        nodeArray.[leader] <! StartGossip("This is 2D Topology")
+        nodeArray.[leader] <! Active
+        GossipActor<! InIt
+    | "push-sum" -> 
+        supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
+        printfn "------------- Begin Push Sum -------------"
+        nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)
+    | _ -> 
+        printfn "Invalid topology"
+
+| "Imp2D" ->
+    let gridSize = nodes |> float |> sqrt |> ceil |> int 
+
+    
+    nodeArray <- Array.zeroCreate (nodes)
+    
+    for x in [0..nodes-1] do
+        let key: string = "demo" + string(x) 
+        let actorRef = spawn system (key) Worker
+        
+        nodeArray.[x] <- actorRef 
+        dictionary.Add(nodeArray.[x], false)
+        
+    printfn "if"
+
+    for i in [ 0 .. (gridSize-1)] do
+        for j in [ 0 .. (gridSize-1) ] do
+            let mutable neighbours: IActorRef [] = [||]
+            if j + 1 < gridSize then
+                printfn "right %d %d formula %d" i j ((i * gridSize) + j + 1)
+                neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j + 1] |])
+            if  j - 1 >= 0 then 
+                printfn "left %d %d formula %d" i j ((i * gridSize) + j - 1)
+                neighbours <- (Array.append neighbours [| nodeArray.[i * gridSize + j - 1] |])
+            if i - 1 >= 0 then
+                printfn "top %d %d  formula %d" i j ((i - 1 ) * gridSize + j)
+                neighbours <- Array.append neighbours [| nodeArray.[(i - 1 ) * gridSize + j ] |]
+            if  i + 1 < gridSize then
+                printfn "bottom %d %d  formula %d %d grid size " i j ((i + 1 ) * gridSize + j) gridSize
+                neighbours <- (Array.append neighbours [| nodeArray.[(i + 1) * gridSize + j] |])
+
+            let rnd = Random().Next(0, nodes-1)
+            neighbours <- (Array.append neighbours [|nodeArray.[rnd] |])
+            nodeArray.[i * gridSize + j] <! Initailize(neighbours)
+   
+    printf "leader"
+    let leader = Random().Next(0, nodes)
+    timer.Start()
+    match protocol with 
+    | "gossip" -> 
+        supervisor <! TotalNodes(nodes)
+        supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
+        printfn "------------- Begin Gossip -------------"
+        nodeArray.[leader] <! Active
+        GossipActor<! InIt
     | "push-sum" -> 
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
