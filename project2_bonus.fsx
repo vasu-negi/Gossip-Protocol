@@ -21,6 +21,8 @@ type GossipMessageTypes =
     | ActivateWorker 
     | CallWorker
     | AddNeighbors
+    | Shutdown of int*IActorRef []
+    | GetNeighborsToIgnore of int []
 
 type Topology = 
     | Gossip of String
@@ -35,6 +37,9 @@ let mutable nodes =
     int (string (fsi.CommandLineArgs.GetValue 1))
 let topology = string (fsi.CommandLineArgs.GetValue 2)
 let protocol = string (fsi.CommandLineArgs.GetValue 3)
+let numNodesToIgnore = string (fsi.CommandLineArgs.GetValue 4) |>int
+let mutable shutdownNeighborsList : int [] = [||]
+
 let timer = Diagnostics.Stopwatch()
 let system = ActorSystem.Create("System")
 let mutable actualNumOfNodes = nodes |> float
@@ -65,10 +70,12 @@ let Supervisor(mailbox: Actor<_>) =
                 printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
                 Environment.Exit(0)
         | Result (sum, weight) ->
-            timer.Stop()
-            printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
-            printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
-            Environment.Exit(0)
+            count <- count + 1
+            if count = totalNodes then
+                timer.Stop()
+                printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
+                printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
+                Environment.Exit(0)
         | Time strtTime -> start <- strtTime
         | TotalNodes n -> totalNodes <- n
         | _ -> ()
@@ -80,7 +87,7 @@ let Supervisor(mailbox: Actor<_>) =
 
 let supervisor = spawn system "Supervisor" Supervisor
 let dictionary = new Dictionary<IActorRef, bool>()
-
+let indexDictionary = new Dictionary<IActorRef, int>()
 ///////////////////////////Worker Actor////////////////////////////////////////
 let Worker(mailbox: Actor<_>) =
     let mutable rumourCount = 0
@@ -88,8 +95,9 @@ let Worker(mailbox: Actor<_>) =
     let mutable sum = 0 |>float
     let mutable weight = 1.0
     let mutable termRound = 1
-    
-    
+    let mutable neighborsToIgoreArray:int [] = [||]
+    let mutable faultynode = false
+
     let rec loop()= actor{
         let! message = mailbox.Receive();
         
@@ -97,7 +105,11 @@ let Worker(mailbox: Actor<_>) =
 
         | Initailize aref ->
             neighbours <- aref
-
+            
+        | GetNeighborsToIgnore shutdownNeighborsList ->
+            neighborsToIgoreArray <-shutdownNeighborsList
+            if Array.contains indexDictionary.[mailbox.Self] neighborsToIgoreArray  then
+                faultynode <- true
         | ActivateWorker ->
             if rumourCount < 11 then
                 let rnd = Random().Next(0, neighbours.Length)
@@ -140,25 +152,33 @@ let Worker(mailbox: Actor<_>) =
                 weight <- weight + w
                 sum <- sum / 2.0
                 weight <- weight / 2.0
-
-                let index =
-                    Random().Next(0, neighbours.Length)
-
-                neighbours.[index]
-                <! ComputePushSum(sum, weight, delta)
+                
+                if not faultynode then
+                    let index =
+                        Random().Next(0, neighbours.Length)
+            
+                    neighbours.[index]
+                    <! ComputePushSum(sum, weight, delta)
 
             | (_, _, _) when termRound >= 3 -> 
                 supervisor <! Result(sum, weight)
+                if not faultynode then
+                    let index =
+                        Random().Next(0, neighbours.Length)
+
+                    neighbours.[index]
+                    <! ComputePushSum(sum, weight, delta)
+
             | _ -> 
                 sum <- sum / 2.0
                 weight <- weight / 2.0
                 termRound <- termRound + 1
+                if not faultynode then
+                    let index =
+                        Random().Next(0, neighbours.Length)
 
-                let index =
-                    Random().Next(0, neighbours.Length)
-
-                neighbours.[index]
-                <! ComputePushSum(sum, weight, delta)
+                    neighbours.[index]
+                    <! ComputePushSum(sum, weight, delta)
         | _ -> ()
 
         return! loop()
@@ -180,8 +200,8 @@ let GossipConvergentActor (mailbox: Actor<_>) =
             if neighbors.Count > 0 then
                 let randomNumber = Random().Next(neighbors.Count)
                 let randomActor = neighbors.[randomNumber]
-                let isConverged = dictionary.[neighbors.[randomNumber]]
-                if (isConverged) then  
+                
+                if (dictionary.[neighbors.[randomNumber]]) then  
                     (neighbors.Remove randomActor) |>ignore
                 else 
                     randomActor <! CallWorker
@@ -206,7 +226,15 @@ match topology with
         let actorRef = spawn system (key) Worker
         nodeArray.[x] <- actorRef 
         dictionary.Add(nodeArray.[x], false)
+        indexDictionary.Add(nodeArray.[x], x)
         nodeArray.[x] <! InitializeVariables x
+
+    for i = 1 to numNodesToIgnore do   
+        let mutable rnd_shutdown = Random().Next(0, nodes)
+        printfn  "shutting down %i"  rnd_shutdown
+        shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
+
+    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! GetNeighborsToIgnore(shutdownNeighborsList))
 
     for i in [ 0 .. nodes ] do
         let mutable neighbourArray = [||]
@@ -218,7 +246,7 @@ match topology with
             neighbourArray <- (Array.append neighbourArray [| nodeArray.[(i - 1)] ; nodeArray.[(i + 1 ) ] |] ) 
         
         nodeArray.[i] <! Initailize(neighbourArray)
-
+    
     let leader = Random().Next(0, nodes)
    
     timer.Start()
@@ -231,6 +259,7 @@ match topology with
         GossipActor<! AddNeighbors
         
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "Starting Push Sum Protocol for Line"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)     
@@ -245,8 +274,13 @@ match topology with
         let actorRef = spawn system (key) Worker
         nodeArray.[x] <- actorRef 
         nodeArray.[x] <! InitializeVariables x
+        indexDictionary.Add(nodeArray.[x], x)
         dictionary.Add(nodeArray.[x], false)
 
+    for i = 1 to numNodesToIgnore do   
+        let mutable rnd_shutdown = Random().Next(0, nodes)
+        printfn  "shutting down %i"  rnd_shutdown
+        shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
     //[0..nodes] |> List.iter (fun i -> nodeArray.[i] <! Initailize(nodeArray))
     
     for i in [ 0 .. nodes ] do
@@ -268,6 +302,7 @@ match topology with
         printfn "------------- Begin Gossip -------------"
         nodeArray.[leader] <! CallWorker
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0) 
@@ -284,8 +319,12 @@ match topology with
         
         nodeArray.[x] <- actorRef 
         nodeArray.[x] <! InitializeVariables x
+        indexDictionary.Add(nodeArray.[x], x)
         dictionary.Add(nodeArray.[x], false)
-        
+    for i = 1 to numNodesToIgnore do   
+        let mutable rnd_shutdown = Random().Next(0, nodes)
+        printfn  "shutting down %i"  rnd_shutdown
+        shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
     for i in [ 0 .. (gridSize-1)] do
         for j in [ 0 .. (gridSize-1) ] do
             let mutable neighbours: IActorRef [] = [||]
@@ -311,6 +350,7 @@ match topology with
         nodeArray.[leader] <! ActivateWorker
         GossipActor<! AddNeighbors
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)
@@ -328,7 +368,12 @@ match topology with
         nodeArray.[x] <- actorRef 
         nodeArray.[x] <! InitializeVariables x
         dictionary.Add(nodeArray.[x], false)
-        
+        indexDictionary.Add(nodeArray.[x], x)
+
+    for i = 1 to numNodesToIgnore do   
+        let mutable rnd_shutdown = Random().Next(0, nodes)
+        printfn  "shutting down %i"  rnd_shutdown
+        shutdownNeighborsList <- (Array.append shutdownNeighborsList [|rnd_shutdown|])
 
     for i in [ 0 .. (gridSize-1)] do
         for j in [ 0 .. (gridSize-1) ] do
@@ -356,6 +401,7 @@ match topology with
         nodeArray.[leader] <! ActivateWorker
         GossipActor<! AddNeighbors
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)

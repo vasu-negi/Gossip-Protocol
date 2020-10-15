@@ -65,10 +65,13 @@ let Supervisor(mailbox: Actor<_>) =
                 printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
                 Environment.Exit(0)
         | Result (sum, weight) ->
-            timer.Stop()
-            printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
-            printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
-            Environment.Exit(0)
+            count <- count + 1
+            printfn "%d" count
+            if count = totalNodes then
+                timer.Stop()
+                printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
+                printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
+                Environment.Exit(0)
         | Time strtTime -> start <- strtTime
         | TotalNodes n -> totalNodes <- n
         | _ -> ()
@@ -85,9 +88,10 @@ let dictionary = new Dictionary<IActorRef, bool>()
 let Worker(mailbox: Actor<_>) =
     let mutable rumourCount = 0
     let mutable neighbours: IActorRef [] = [||]
-    let mutable sum = 0 |>float
+    let mutable sum = 0 |>double
     let mutable weight = 1.0
     let mutable termRound = 1
+    let mutable alreadyConverged = false
     
     
     let rec loop()= actor{
@@ -117,7 +121,6 @@ let Worker(mailbox: Actor<_>) =
         | InitializeVariables number ->
             sum <- number |> double
 
-
         | StartPushSum delta ->
             let index = Random().Next(0, neighbours.Length)
 
@@ -129,38 +132,24 @@ let Worker(mailbox: Actor<_>) =
             let newsum = sum + s
             let newweight = weight + w
 
-            let cal =
-                sum / weight - newsum / newweight |> abs
+            let cal = sum / weight - newsum / newweight |> abs
 
+            if not alreadyConverged then
+                if cal > delta then
+                    termRound <- 0
+                else 
+                    termRound <- termRound + 1
 
-            match (s, w, delta) with
-            | (_, _, delta) when cal > delta -> 
+            if  termRound = 3 then
                 termRound <- 0
-                sum <- sum + s
-                weight <- weight + w
-                sum <- sum / 2.0
-                weight <- weight / 2.0
-
-                let index =
-                    Random().Next(0, neighbours.Length)
-
-                neighbours.[index]
-                <! ComputePushSum(sum, weight, delta)
-
-            | (_, _, _) when termRound >= 3 -> 
+                alreadyConverged <- true
                 supervisor <! Result(sum, weight)
-            | _ -> 
-                sum <- sum / 2.0
-                weight <- weight / 2.0
-                termRound <- termRound + 1
-
-                let index =
-                    Random().Next(0, neighbours.Length)
-
-                neighbours.[index]
-                <! ComputePushSum(sum, weight, delta)
-        | _ -> ()
-
+            
+            sum <- newsum / 2.0
+            weight <- newweight / 2.0
+            let index = Random().Next(0, neighbours.Length)
+            neighbours.[index] <! ComputePushSum(sum, weight, delta)
+                
         return! loop()
     }            
     loop()
@@ -180,8 +169,8 @@ let GossipConvergentActor (mailbox: Actor<_>) =
             if neighbors.Count > 0 then
                 let randomNumber = Random().Next(neighbors.Count)
                 let randomActor = neighbors.[randomNumber]
-                let isConverged = dictionary.[neighbors.[randomNumber]]
-                if (isConverged) then  
+                
+                if (dictionary.[neighbors.[randomNumber]]) then  
                     (neighbors.Remove randomActor) |>ignore
                 else 
                     randomActor <! CallWorker
@@ -231,6 +220,7 @@ match topology with
         GossipActor<! AddNeighbors
         
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "Starting Push Sum Protocol for Line"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)     
@@ -268,6 +258,7 @@ match topology with
         printfn "------------- Begin Gossip -------------"
         nodeArray.[leader] <! CallWorker
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0) 
@@ -311,6 +302,7 @@ match topology with
         nodeArray.[leader] <! ActivateWorker
         GossipActor<! AddNeighbors
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)
@@ -356,6 +348,7 @@ match topology with
         nodeArray.[leader] <! ActivateWorker
         GossipActor<! AddNeighbors
     | "push-sum" -> 
+        supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
         nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)
