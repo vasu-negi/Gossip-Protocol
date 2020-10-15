@@ -179,8 +179,8 @@ let GossipConvergentActor (mailbox: Actor<_>) =
         | ActivateWorker ->
             if neighbors.Count > 0 then
                 let randomNumber = Random().Next(neighbors.Count)
-                let randomActor: IActorRef = neighbors.[randomNumber]
-                let isConverged: bool = dictionary.[neighbors.[randomNumber]]
+                let randomActor = neighbors.[randomNumber]
+                let isConverged = dictionary.[neighbors.[randomNumber]]
                 if (isConverged) then  
                     (neighbors.Remove randomActor) |>ignore
                 else 
