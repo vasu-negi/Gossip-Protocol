@@ -8,7 +8,7 @@ open Akka.Configuration
 open Akka.FSharp
 open System.Diagnostics
     
-
+open System.Collections.Generic
 
 type Gossip =
     | Initailize of IActorRef []
@@ -20,7 +20,8 @@ type Gossip =
     | Result of Double * Double
     | Time of int
     | TotalNodes of int
-
+    | Active 
+    | Call
 type Topology = 
     | Gossip of String
     | PushSum of String
@@ -39,7 +40,7 @@ let topology = string (fsi.CommandLineArgs.GetValue 2)
 let protocol = string (fsi.CommandLineArgs.GetValue 3)
 
 
-
+let timer = Diagnostics.Stopwatch()
 let system = ActorSystem.Create("System")
 
 let mutable actualNumOfNodes = nodes |> float
@@ -67,7 +68,8 @@ let Supervisor(mailbox: Actor<_>) =
             let ending = DateTime.Now.TimeOfDay.Milliseconds
             count <- count + 1
             if count = totalNodes then
-                printfn "Time for convergence: %i ms" (ending - start)
+                timer.Stop()
+                printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
                 Environment.Exit(0)
 
         | Result (sum, weight) ->
@@ -87,6 +89,8 @@ let Supervisor(mailbox: Actor<_>) =
 
 
 let supervisor = spawn system "Supervisor" Supervisor
+let dictionary = new Dictionary<IActorRef, bool>()
+
 
 let Worker(mailbox: Actor<_>) =
     let mutable rumourCount = 0
@@ -96,24 +100,35 @@ let Worker(mailbox: Actor<_>) =
     let mutable sum = 0 |>float
     let mutable weight = 1.0
     let mutable termRound = 1
-
-
+    
     
     let rec loop()= actor{
         let! message = mailbox.Receive();
-        match message with 
         
+        match message with 
 
         | Initailize aref -> neighbours <- aref
 
-        | StartGossip msg ->
+        | Active ->
+            let rnd = Random().Next(0, neighbours.Length)
+            if not dictionary.[neighbours.[rnd]] then
+                neighbours.[rnd] <! Call
+            mailbox.Self <! Active
+
+        | Call ->
+            
+            
+            if rumourCount = 0 then 
+                
+                mailbox.Self <! Active
+            if (rumourCount = 10) then 
+                supervisor <! ReportMsgRecvd "Rumor"
+                dictionary.[mailbox.Self] <- true
             rumourCount <- rumourCount + 1
             
-            if (rumourCount = 10) then supervisor <! ReportMsgRecvd(msg)
+            
 
-            if (rumourCount <= 100) then
-                let rnd = Random().Next(0, neighbours.Length)
-                neighbours.[rnd] <! StartGossip(msg)
+             
 
         | StartPushSum delta ->
             let index = Random().Next(0, neighbours.Length)
@@ -175,7 +190,7 @@ match topology with
         let key: string = "demo" + string(x) 
         let actorRef = spawn system (key) Worker
         nodeArray.[x] <- actorRef 
-        
+        dictionary.Add(nodeArray.[x], false)
     
 
     for i in [ 0 .. nodes ] do
@@ -189,8 +204,9 @@ match topology with
         
         nodeArray.[i] <! Initailize(neighbourArray)
 
-
+    
     let leader = Random().Next(0, nodes)
+    timer.Start()
     match protocol with
     | "gossip" -> 
         supervisor <! TotalNodes(nodes)
@@ -206,17 +222,14 @@ match topology with
 
 | "full" ->
     let nodeArray = Array.zeroCreate (nodes + 1)
-    
-
+   
     for x in [0..nodes] do
         let key: string = "demo" + string(x) 
         let actorRef = spawn system (key) Worker
         nodeArray.[x] <- actorRef 
-        
-
-
+        dictionary.Add(nodeArray.[x], false)
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! Initailize(nodeArray))
-
+    timer.Start()
     let leader = Random().Next(0, nodes)
 
     match protocol with
@@ -224,11 +237,11 @@ match topology with
         supervisor <! TotalNodes(nodes)
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Gossip -------------"
-        nodeArray.[leader] <! StartGossip("Hello")
+        nodeArray.[leader] <! Call
     | "push-sum" -> 
         supervisor <! Time(DateTime.Now.TimeOfDay.Milliseconds)
         printfn "------------- Begin Push Sum -------------"
-        nodeArray.[leader] <! StartPushSum(10.0 ** -10.0)
+        nodeArray.[leader] <! Call
     | _ ->
         printfn "Invalid topology"
 
@@ -243,7 +256,6 @@ match topology with
         let actorRef = spawn system (key) Worker
         nodeArray.[x] <- actorRef 
         
-
     for i in [ 0 .. gridSize - 1 ] do
         for j in [ 0 .. gridSize - 1 ] do
             let mutable neighbours: IActorRef [] = [||]
@@ -255,9 +267,8 @@ match topology with
                         
             nodeArray.[i * gridSize + j] <! Initailize(neighbours)
 
-
-
     let leader = Random().Next(0, totGrid - 1)
+    timer.Start()
     match protocol with 
     | "gossip" -> 
         supervisor <! TotalNodes(totGrid - 1)
