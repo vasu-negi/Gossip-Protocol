@@ -13,6 +13,12 @@
     - [Linear Scale](#linear-scale)
     - [Logarithmic Scale](#logarithmic-scale)
 - [What is the largest network you managed to deal with for each type of topology and algorithm](#what-is-the-largest-network-you-managed-to-deal-with-for-each-type-of-topology-and-algorithm)
+  - [Gossip 10k](#gossip-10k)
+    - [Normal Scale 10k](#normal-scale-10k)
+    - [Log Scale 10k](#log-scale-10k)
+  - [PushSum 10k](#pushsum-10k)
+    - [Linear Scale 10k](#linear-scale-10k)
+    - [Logarithmic Scale 10k](#logarithmic-scale-10k)
 
 ## Build Process
 
@@ -53,4 +59,24 @@ We able to run all `line`, `full`, `2D` and `Imp2D` in any combination with `gos
 
 ## What is the largest network you managed to deal with for each type of topology and algorithm
 
-The largest network that we have managed to solve is 10k nodes for each topology and algorithm.
+The largest network that we have managed to solve is 10k nodes for each topology and algorithm. Following are the result
+
+### Gossip 10k
+
+#### Normal Scale 10k
+
+![Gossip](./docs/gossip_10k.png)
+
+#### Log Scale 10k
+
+![Gossip](./docs/gossip_log_10k.png)
+
+### PushSum 10k
+
+#### Linear Scale 10k
+
+![Gossip](./docs/pushsum_10k.png)
+
+#### Logarithmic Scale 10k
+
+![Gossip](./docs/pushsum_log_10k.png)
