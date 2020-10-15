@@ -1,16 +1,18 @@
-#if INTERACTIVE
-#r "nuget: Akka.FSharp"
-#r "nuget: Akka.TestKit"
-#endif
-
-
+#time "on"
+#r "nuget: Akka.FSharp" 
+#r "nuget: Akka.TestKit" 
 
 open System
 open Akka.Actor
+open Akka.Configuration
 open Akka.FSharp
+open System.Diagnostics
+    
+
 
 type Gossip =
     | Initailize of IActorRef []
+    | InitializeVariables of int
     | StartGossip of String
     | ReportMsgRecvd of String
     | StartPushSum of Double
@@ -28,25 +30,45 @@ type Protocol =
     | Full of String
     | TwoDimension of String
 
-    
-//https://gist.github.com/akimboyko/e58e4bfbba3e9a551f05 Example 3
 
-type Supervisor() =
-    inherit Actor()
+//Point of execution
+let mutable nodes =
+    int (string (fsi.CommandLineArgs.GetValue 1))
+
+let topology = string (fsi.CommandLineArgs.GetValue 2)
+let protocol = string (fsi.CommandLineArgs.GetValue 3)
+
+
+
+let system = ActorSystem.Create("System")
+
+let mutable actualNumOfNodes = nodes |> float
+
+
+nodes =
+    match topology with
+    | "2D" | "imp2D" -> 
+        (actualNumOfNodes ** 0.5) ** 2.0 |> float |> int
+    | _ -> nodes
+
+
+
+
+let Supervisor(mailbox: Actor<_>) =
+    
     let mutable count = 0
     let mutable start = 0
     let mutable totalNodes = 0
 
-    override x.OnReceive(msg) =
-        match msg :?> Gossip with
-        | ReportMsgRecvd _ ->
+    let rec loop()= actor{
+        let! msg = mailbox.Receive();
+        match msg with 
+        | ReportMsgRecvd _ -> 
             let ending = DateTime.Now.TimeOfDay.Milliseconds
-
             count <- count + 1
             if count = totalNodes then
                 printfn "Time for convergence: %i ms" (ending - start)
                 Environment.Exit(0)
-
 
         | Result (sum, weight) ->
             let ending = DateTime.Now.TimeOfDay.Milliseconds
@@ -58,20 +80,30 @@ type Supervisor() =
         | TotalNodes n -> totalNodes <- n
         | _ -> ()
 
-type Worker(supervisor: IActorRef, numResend: int, nodeNum: int) =
-    inherit Actor()
+        return! loop()
+    }            
+    loop()
+
+
+
+let supervisor = spawn system "Supervisor" Supervisor
+
+let Worker(mailbox: Actor<_>) =
     let mutable rumourCount = 0
     let mutable neighbours: IActorRef [] = [||]
 
-    //used for push sum
-    let mutable sum = nodeNum |> float
+    
+    let mutable sum = 0 |>float
     let mutable weight = 1.0
     let mutable termRound = 1
 
 
+    
+    let rec loop()= actor{
+        let! message = mailbox.Receive();
+        match message with 
+        
 
-    override x.OnReceive(num) =
-        match num :?> Gossip with
         | Initailize aref -> neighbours <- aref
 
         | StartGossip msg ->
@@ -125,39 +157,29 @@ type Worker(supervisor: IActorRef, numResend: int, nodeNum: int) =
                 <! ComputePushSum(sum, weight, delta)
         | _ -> ()
 
-//Point of execution
-let mutable nodes =
-    int (string (fsi.CommandLineArgs.GetValue 1))
-
-let topology = string (fsi.CommandLineArgs.GetValue 2)
-let protocol = string (fsi.CommandLineArgs.GetValue 3)
+        return! loop()
+    }            
+    loop()
 
 
 
-let system = ActorSystem.Create("System")
-
-let mutable actualNumOfNodes = nodes |> float
 
 
-nodes =
-    match topology with
-    | "2D" | "imp2D" -> 
-        (actualNumOfNodes ** 0.5) ** 2.0 |> float |> int
-    | _ -> nodes
-
-
-let supervisor =
-    system.ActorOf(Props.Create(typeof<Supervisor>), "supervisor")
 
 match topology with
 | "line" ->
     let nodeArray = Array.zeroCreate (nodes + 1)
-    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
+    //[0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(Worker, supervisor, 10, i + 1), "demo" + string (i)))
+
+    for x in [0..nodes] do
+        let key: string = "demo" + string(x) 
+        let actorRef = spawn system (key) Worker
+        nodeArray.[x] <- actorRef 
         
+    
+
     for i in [ 0 .. nodes ] do
         let mutable neighbourArray = [||]
-
-        
         if i = 0 then
             neighbourArray <- (Array.append neighbourArray [|nodeArray.[i+1]|])
         elif i = nodes then
@@ -184,7 +206,15 @@ match topology with
 
 | "full" ->
     let nodeArray = Array.zeroCreate (nodes + 1)
-    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
+    
+
+    for x in [0..nodes] do
+        let key: string = "demo" + string(x) 
+        let actorRef = spawn system (key) Worker
+        nodeArray.[x] <- actorRef 
+        
+
+
     [0..nodes] |> List.iter (fun i -> nodeArray.[i] <! Initailize(nodeArray))
 
     let leader = Random().Next(0, nodes)
@@ -207,7 +237,12 @@ match topology with
 
     let totGrid = gridSize * gridSize
     let nodeArray = Array.zeroCreate (totGrid)
-    [0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
+    //[0..nodes] |> List.iter (fun i -> nodeArray.[i] <- system.ActorOf(Props.Create(typeof<Worker>, supervisor, 10, i + 1), "demo" + string (i)))
+    for x in [0..nodes] do
+        let key: string = "demo" + string(x) 
+        let actorRef = spawn system (key) Worker
+        nodeArray.[x] <- actorRef 
+        
 
     for i in [ 0 .. gridSize - 1 ] do
         for j in [ 0 .. gridSize - 1 ] do
