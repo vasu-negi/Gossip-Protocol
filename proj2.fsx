@@ -68,7 +68,7 @@ let Supervisor(mailbox: Actor<_>) =
             count <- count + 1
             if count = totalNodes then
                 timer.Stop()
-                printfn "Sum = %f Weight= %f Average=%f" sum weight (sum / weight)
+                
                 printfn "Time for convergence: %f ms" timer.Elapsed.TotalMilliseconds
                 Environment.Exit(0)
         | Time strtTime -> start <- strtTime
@@ -160,7 +160,7 @@ let Worker(mailbox: Actor<_>) =
 
 
 
-let GossipConvergentActor (mailbox: Actor<_>) =
+let ActorWorker (mailbox: Actor<_>) =
     let neighbors = new List<IActorRef>()
     let rec loop() = actor {
         let! message = mailbox.Receive()
@@ -185,7 +185,7 @@ let GossipConvergentActor (mailbox: Actor<_>) =
     loop()
 
 
-let GossipActor = spawn system "GossipConvergentActor" GossipConvergentActor
+let GossipActor = spawn system "ActorWorker" ActorWorker
 
 ///////////////////////////Worker Actor////////////////////////////////////////
 
