@@ -1,7 +1,4 @@
-## Team Members
 
-Vasu Negi (UF ID: 8495-3933)
-Manish Yadav (UF ID: 3836-6483)
 ## What is Working
 
 We able to run all `line`, `full`, `2D`, and `Imp2D` in any combination with `gossip` or `push-sum` protocol. The convergence in Gossip protocol is achieved when all the nodes have converged. A node is set to be converged when it listens to the message for the 10th time. After convergence, the node stops transmitting the message to its neighbor. Once the network is converged i.e. all nodes are converged, the total time for convergence is printed out.
